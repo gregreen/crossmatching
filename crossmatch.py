@@ -233,7 +233,7 @@ def match_catalogs(base_cat, over_cat, dist_max):
     else:
         dist_match = np.array([]) * units.rad
 
-    return idx1_match, idx2_match
+    return idx1_match, idx2_match, dist_match
 
 
 def main():
