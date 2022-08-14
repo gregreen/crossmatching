@@ -139,7 +139,7 @@ def plot_patch(lon1, lat1, lon2, lat2, projection='mollweide'):
 
 
 class HEALPixCatalog(object):
-    def __init__(self, lon, lat, nside):
+    def __init__(self, lon, lat, nside, show_progress=False):
         self.nside = nside
         self.hpix = HEALPix(nside=nside, order='nested')
 
@@ -153,6 +153,10 @@ class HEALPixCatalog(object):
         pix_idx_unique = np.unique(pix_idx)
         start_idx = np.searchsorted(pix_idx, pix_idx_unique)
         start_idx = np.hstack([start_idx, len(pix_idx)])
+
+        if show_progress:
+            from tqdm import tqdm
+            pix_idx_unique = tqdm(pix_idx_unique)
 
         self.hpix_dict = {}
         for pidx,i0,i1 in zip(pix_idx_unique,start_idx[:-1],start_idx[1:]):
@@ -172,9 +176,10 @@ class HEALPixCatalog(object):
                 lon.append(lon_pix)
                 lat.append(lat_pix)
                 idx.append(idx_pix)
-        lon = np.hstack(lon)
-        lat = np.hstack(lat)
-        idx = np.hstack(idx)
+        if len(lon):
+            lon = np.hstack(lon)
+            lat = np.hstack(lat)
+            idx = np.hstack(idx)
         return lon, lat, idx
 
     def fetch_patch(self, lon, lat):
@@ -195,7 +200,7 @@ def dist2_matrix(lon1, lat1, lon2, lat2):
 
 
 def match_catalogs(base_cat, over_cat, dist_max):
-    idx1_match, idx2_match = [], []
+    idx1_match, idx2_match, dist_match = [], [], []
 
     dmax_rad = dist_max.to('rad').value
 
@@ -204,6 +209,9 @@ def match_catalogs(base_cat, over_cat, dist_max):
         lon1, lat1, idx1 = base_cat.fetch_patch(lon2, lat2)
         #print(f'idx1.shape = {idx1.shape}')
         #print(f'idx2.shape = {idx2.shape}')
+
+        if (len(lon1) == 0) or (len(lon2) == 0):
+            continue
 
         d2 = dist2_matrix(lon1, lat1, lon2, lat2) # shape = (patch1, patch2)
         #print(f'd2.shape = {d2.shape}')
@@ -216,9 +224,14 @@ def match_catalogs(base_cat, over_cat, dist_max):
         idx_sel = (d2_min < dmax_rad**2)
         idx1_match.append(idx1[idx1_min[idx_sel]])
         idx2_match.append(idx2[idx_sel])
+        dist_match.append(np.sqrt(d2_min[idx_sel])*units.rad)
 
-    idx1_match = np.hstack(idx1_match)
-    idx2_match = np.hstack(idx2_match)
+    if len(idx1_match):
+        idx1_match = np.hstack(idx1_match)
+        idx2_match = np.hstack(idx2_match)
+        dist_match = np.hstack(dist_match)
+    else:
+        dist_match = np.array([]) * units.rad
 
     return idx1_match, idx2_match
 
@@ -247,7 +260,8 @@ def main():
     base_cat = HEALPixCatalog(
         phi1*units.rad,
         (0.5*np.pi-theta1)*units.rad,
-        nside_base
+        nside_base,
+        show_progress=True
     )
     t1 = perf_counter()
     print(f'  --> {1000*(t1-t0)} ms')
