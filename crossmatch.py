@@ -7,12 +7,15 @@ import numpy as np
 import astropy.units as units
 from astropy_healpix import HEALPix
 
+import scipy.spatial.distance
+
 
 def sph2cart(phi, theta):
-    x = np.cos(phi) * np.sin(theta)
-    y = np.sin(phi) * np.sin(theta)
-    z = np.cos(theta)
-    return x, y, z
+    xyz = np.empty((phi.size,3), dtype=phi.dtype)
+    xyz[:,0] = np.cos(phi) * np.sin(theta)
+    xyz[:,1] = np.sin(phi) * np.sin(theta)
+    xyz[:,2] = np.cos(theta)
+    return xyz
 
 
 def cart2sph(x, y, z):
@@ -34,7 +37,7 @@ def offset_points_on_sphere(phi, theta, dist, rng=None):
     if rng is None:
         rng = np.random.default_rng()
     # Convert to Cartesian
-    x,y,z = sph2cart(phi, theta)
+    x,y,z = sph2cart(phi, theta).T
     # Add a small offset
     x += rng.normal(size=x.size) * dist / np.sqrt(3)
     y += rng.normal(size=x.size) * dist / np.sqrt(3)
@@ -82,9 +85,9 @@ def gen_data(n1, n2, n_shared, offset, rng=None):
 
 
 def calc_distance(phi1, theta1, phi2, theta2):
-    x1,y1,z1 = sph2cart(phi1, theta1)
-    x2,y2,z2 = sph2cart(phi2, theta2)
-    dist = np.sqrt((x2-x1)**2 + (y2-y1)**2 + (z2-z1)**2)
+    xyz1 = sph2cart(phi1, theta1)
+    xyz2 = sph2cart(phi2, theta2)
+    dist = np.linalg.norm(xyz2-xyz1, axis=1)
     return dist
 
 
@@ -139,11 +142,22 @@ class HEALPixCatalog(object):
     def __init__(self, lon, lat, nside):
         self.nside = nside
         self.hpix = HEALPix(nside=nside, order='nested')
+
         pix_idx = self.hpix.lonlat_to_healpix(lon, lat)
+
+        self.sort_idx = np.argsort(pix_idx)
+        pix_idx = pix_idx[self.sort_idx]
+        lon = lon[self.sort_idx]
+        lat = lat[self.sort_idx]
+
+        pix_idx_unique = np.unique(pix_idx)
+        start_idx = np.searchsorted(pix_idx, pix_idx_unique)
+        start_idx = np.hstack([start_idx, len(pix_idx)])
+
         self.hpix_dict = {}
-        for pidx in np.unique(pix_idx):
-            idx = (pix_idx == pidx)
-            self.hpix_dict[pidx] = (lon[idx], lat[idx], np.where(idx)[0])
+        for pidx,i0,i1 in zip(pix_idx_unique,start_idx[:-1],start_idx[1:]):
+            assert np.all(pix_idx[i0:i1] == pidx)
+            self.hpix_dict[pidx] = (lon[i0:i1], lat[i0:i1], self.sort_idx[i0:i1])
 
     def fetch_pixel(self, pix_idx):
         if pix_idx in self.hpix_dict:
@@ -174,13 +188,9 @@ class HEALPixCatalog(object):
 
 
 def dist2_matrix(lon1, lat1, lon2, lat2):
-    x1,y1,z1 = sph2cart(lon1.to('rad').value, 0.5*np.pi-lat1.to('rad').value)
-    x2,y2,z2 = sph2cart(lon2.to('rad').value, 0.5*np.pi-lat2.to('rad').value)
-    d2 = (
-        (x1[:,None]-x2[None,:])**2
-      + (y1[:,None]-y2[None,:])**2
-      + (z1[:,None]-z2[None,:])**2
-    )
+    xyz1 = sph2cart(lon1.to('rad').value, 0.5*np.pi-lat1.to('rad').value)
+    xyz2 = sph2cart(lon2.to('rad').value, 0.5*np.pi-lat2.to('rad').value)
+    d2 = scipy.spatial.distance.cdist(xyz1, xyz2, 'sqeuclidean')
     return d2
 
 
@@ -203,7 +213,7 @@ def match_catalogs(base_cat, over_cat, dist_max):
         d2_min = d2[idx1_min, np.arange(d2.shape[1])] # shape = (patch2,)
         #print(f'd2_min.shape = {d2_min.shape}')
 
-        idx_sel = d2_min < dmax_rad**2
+        idx_sel = (d2_min < dmax_rad**2)
         idx1_match.append(idx1[idx1_min[idx_sel]])
         idx2_match.append(idx2[idx_sel])
 
@@ -217,9 +227,11 @@ def main():
     import matplotlib.pyplot as plt
     from time import perf_counter
 
-    n1, n2, n_shared = 1024*16, 1024*4, 1024*8
+    n1, n2, n_shared = 1024*16, 1024*4, 1024*16
     offset = np.radians(1./3600.)
     match_radius = 5*units.arcsec
+    nside_base = 16
+    nside_over = 8
     rng = np.random.default_rng(seed=123)
 
     print('Generating mock data ...')
@@ -232,7 +244,6 @@ def main():
 
     print('Partitioning base catalog ...')
     t0 = perf_counter()
-    nside_base = 16
     base_cat = HEALPixCatalog(
         phi1*units.rad,
         (0.5*np.pi-theta1)*units.rad,
@@ -243,7 +254,6 @@ def main():
 
     print('Partitioning overlay catalog ...')
     t0 = perf_counter()
-    nside_over = 8
     over_cat = HEALPixCatalog(
         phi2*units.rad,
         (0.5*np.pi-theta2)*units.rad,
