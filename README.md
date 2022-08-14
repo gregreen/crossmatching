@@ -16,7 +16,7 @@ base_cat = HEALPixCatalog(lon_base, lat_base, nside_base)
 nside_over = 8
 over_cat = HEALPixCatalog(lon_over, lat_over, nside_over)
 
-idx_match_base, idx_match_over = match_catalogs(base_cat, over_cat, dmax)
+idx_match_base, idx_match_over, dist = match_catalogs(base_cat, over_cat, dmax)
 ```
 
 There is an example implementation in the `main()` function of `crossmatch.py`.
