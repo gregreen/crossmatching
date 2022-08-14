@@ -287,7 +287,7 @@ def main():
 
     print('Matching catalogs ...')
     t0 = perf_counter()
-    idx1_match, idx2_match = match_catalogs(base_cat, over_cat, match_radius)
+    idx1_match,idx2_match,d = match_catalogs(base_cat, over_cat, match_radius)
     t1 = perf_counter()
     print(f'  --> {1000*(t1-t0)} ms')
 
