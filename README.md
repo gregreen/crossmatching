@@ -26,6 +26,7 @@ Dependencies
 ------------
 
 * `numpy`
+* `scipy`
 * `astropy`
 * `astropy_healpix`
 
